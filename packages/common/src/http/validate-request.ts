@@ -35,7 +35,13 @@ export const validateRequest = (schemas: RequestValidationSchemas) => {
 
       if (schemas.query) {
         const parsedQuery = schemas.query.parse(req.query) as QueryRecord;
-        req.query = parsedQuery as Request["query"];
+        // Express 5 exposes `req.query` as a getter-only property, so it can no
+        // longer be reassigned directly (`req.query = ...` throws a TypeError).
+        Object.defineProperty(req, "query", {
+          value: parsedQuery,
+          writable: true,
+          configurable: true,
+        });
       }
 
       next();
