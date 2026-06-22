@@ -1,0 +1,235 @@
+services:
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: chatapp-rabbitmq
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - chatapp-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+  
+
+  redis:
+    image: redis:7
+    container_name: chatapp-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - chatapp-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s    
+  
+  mongo:
+    image: mongo:7
+    container_name: chatapp-mongo
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-password}
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - chatapp-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+  user-db:
+    image: postgres:16
+    container_name: chatapp-user-db
+    environment:
+      POSTGRES_DB: ${USER_DB_NAME:-chatapp_user_service}
+      POSTGRES_USER: ${USER_DB_USER:-chatapp_user}
+      POSTGRES_PASSWORD: ${USER_DB_PASSWORD:-chatapp_password}
+    ports:
+      - '${USER_DB_PORT:-5432}:5432'
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+    networks:
+      - chatapp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${USER_DB_USER:-chatapp_user} -d ${USER_DB_NAME:-chatapp_user_service}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5    
+  
+
+  auth-db:
+    image: mysql:8.0
+    container_name: chatapp-auth-db
+    environment:
+      MYSQL_DATABASE: ${AUTH_DB_NAME:-chatapp_auth_service}
+      MYSQL_USER: ${AUTH_DB_USER:-chatapp_auth_user}
+      MYSQL_PASSWORD: ${AUTH_DB_PASSWORD:-chatapp_auth_password}
+      MYSQL_ROOT_PASSWORD: ${AUTH_DB_ROOT_PASSWORD:-root_password}
+    command: ["mysqld", "--default-authentication-plugin=mysql_native_password"]
+    ports:
+      - "${AUTH_DB_PORT:-3306}:3306"
+    volumes:
+      - auth-db-data:/var/lib/mysql
+    networks:
+      - chatapp-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${AUTH_DB_ROOT_PASSWORD:-root_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+  
+  gateway-service:
+    build: 
+        context: .
+        dockerfile: services/gateway-service/Dockerfile
+    container_name: chatapp-gateway-service
+    ports:
+      - "${GATEWAY_PORT:-4000}:4000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      GATEWAY_PORT: ${GATEWAY_PORT:-4000}
+      USER_SERVICE_URL: http://user-service:4001
+      AUTH_SERVICE_URL: http://auth-service:4003
+      CHAT_SERVICE_URL: http://chat-service:4002
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+    # networks:
+    #   - chatapp-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    
+
+  auth-service:
+    build: 
+        context: .
+        dockerfile: services/auth-service/Dockerfile
+    container_name: chatapp-auth-service
+    ports:
+      - "${AUTH_SERVICE_PORT:-4003}:4003"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      AUTH_SERVICE_PORT: ${AUTH_SERVICE_PORT:-4003}
+      AUTH_DB_URL: ${AUTH_DB_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - chatapp-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+  
+  user-service:
+    build: 
+        context: .
+        dockerfile: services/user-service/Dockerfile
+    container_name: chatapp-user-service
+    ports:
+      - "${USER_SERVICE_PORT:-4001}:4001"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      USER_SERVICE_PORT: ${USER_SERVICE_PORT:-4001}
+      USER_DB_URL: ${USER_DB_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+    depends_on:
+      user-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - chatapp-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+  
+  chat-service:
+    build: 
+        context: .
+        dockerfile: services/chat-service/Dockerfile
+    container_name: chatapp-chat-service
+    ports:
+      - "${CHAT_SERVICE_PORT:-4002}:4002"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      CHAT_SERVICE_PORT: ${CHAT_SERVICE_PORT:-4002}
+      MONGO_URL: ${MONGO_URL}
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - chatapp-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  user-db-data:
+  mongo-data:
+  auth-db-data:
+  redis-data:
+  rabbitmq-data:
+
+
+networks:
+  chatapp-network:
+    driver: bridge

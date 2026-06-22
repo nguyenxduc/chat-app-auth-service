@@ -1,0 +1,27 @@
+{
+  "name": "chatapp",
+  "version": "1.0.0",
+  "privayte": true,
+  "description": "",
+  "scripts": {
+    "build": "pnpm -r --workspace-root=false run build",
+    "dev": "pnpm -r --workspace-root=false run dev",
+    "lint": "pnpm -r --workspace-root=false run lint",
+    "format": "pnpm -r --workspace-root=false run format",
+    "test": "pnpm -r --workspace-root=false run test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.14.0",
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
+    "eslint": "^9.39.1",
+    "prettier": "^3.7.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

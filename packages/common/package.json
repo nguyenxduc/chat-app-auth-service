@@ -1,0 +1,26 @@
+{
+  "name": "@chatapp/common",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --project tsconfig.json && tsc-alias -p tsconfig.json --resolve-full-paths"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.14.0",
+  "dependencies": {
+    "express": "^5.1.0",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.5",
+    "tsc-alias": "^1.8.16"
+  }
+}
