@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { loginSchema, refreshSchema, registerSchema, revokeSchema } from '@/validation/auth.schema';
+import {
+  forgotPasswordSchema,
+  googleLoginSchema,
+  loginSchema,
+  refreshSchema,
+  registerSchema,
+  resetPasswordSchema,
+  revokeSchema,
+} from '@/validation/auth.schema';
 
 describe('registerSchema', () => {
   it('accepts a valid payload', () => {
@@ -72,6 +80,59 @@ describe('revokeSchema', () => {
 
   it('rejects a non-UUID userId', () => {
     const result = revokeSchema.shape.body.safeParse({ userId: 'not-a-uuid' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('googleLoginSchema', () => {
+  it('accepts a valid payload', () => {
+    const result = googleLoginSchema.shape.body.safeParse({ idToken: 'some-id-token' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a missing idToken', () => {
+    const result = googleLoginSchema.shape.body.safeParse({});
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('forgotPasswordSchema', () => {
+  it('accepts a valid email', () => {
+    const result = forgotPasswordSchema.shape.body.safeParse({ email: 'a@b.com' });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an invalid email', () => {
+    const result = forgotPasswordSchema.shape.body.safeParse({ email: 'not-an-email' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('resetPasswordSchema', () => {
+  it('accepts a valid payload', () => {
+    const result = resetPasswordSchema.shape.body.safeParse({
+      email: 'a@b.com',
+      otp: '123456',
+      newPassword: 'password123',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an OTP that is not exactly 6 characters', () => {
+    const result = resetPasswordSchema.shape.body.safeParse({
+      email: 'a@b.com',
+      otp: '12345',
+      newPassword: 'password123',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a new password shorter than 8 characters', () => {
+    const result = resetPasswordSchema.shape.body.safeParse({
+      email: 'a@b.com',
+      otp: '123456',
+      newPassword: 'short',
+    });
     expect(result.success).toBe(false);
   });
 });

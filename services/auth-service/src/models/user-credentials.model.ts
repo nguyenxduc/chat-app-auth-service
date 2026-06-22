@@ -5,14 +5,17 @@ export interface UserCredentialsAttributes {
   id: string;
   email: string;
   displayName: string;
-  passwordHash: string;
+  /** Null for accounts created via Google login that have never set a password. */
+  passwordHash: string | null;
+  /** Google "sub" claim. Null for accounts that have never linked a Google account. */
+  googleId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export type UserCredentialsCreationAttributes = Optional<
   UserCredentialsAttributes,
-  "id" | "createdAt" | "updatedAt"
+  "id" | "createdAt" | "updatedAt" | "passwordHash" | "googleId"
 >;
 
 export class UserCredentials
@@ -22,7 +25,8 @@ export class UserCredentials
   declare id: string;
   declare email: string;
   declare displayName: string;
-  declare passwordHash: string;
+  declare passwordHash: string | null;
+  declare googleId: string | null;
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -44,7 +48,12 @@ UserCredentials.init(
     },
     passwordHash: {
       type: DataTypes.STRING,
-      allowNull: false,
+      allowNull: true,
+    },
+    googleId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      unique: true,
     },
     displayName: {
       type: DataTypes.STRING,

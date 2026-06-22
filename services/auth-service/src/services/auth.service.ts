@@ -8,6 +8,10 @@ import {
   userCredentialsRepository,
   UserCredentialsRepository,
 } from '@/repositories/user-credentials.repository';
+import {
+  passwordResetRepository,
+  PasswordResetRepository,
+} from '@/repositories/password-reset.repository';
 import { AuthResponse, AuthTokens, LoginInput, RegisterInput } from '@/types/auth';
 import {
   hashPassword,
@@ -16,18 +20,24 @@ import {
   verifyPassword,
   verifyRefreshToken,
 } from '@/utils/token';
+import { verifyGoogleIdToken } from '@/utils/google';
 import { HttpError } from '@chatapp/common';
 import type { Transaction } from 'sequelize';
 import crypto from 'crypto';
-import { publishUserRegistered } from '@/messaging/event-publishing';
+import {
+  publishPasswordResetRequested,
+  publishUserRegistered,
+} from '@/messaging/event-publishing';
 import { logger } from '@/utils/logger';
 
 const REFRESH_TOKEN_TTL_DAYS = 30;
+const OTP_DIGITS = 6;
 
 export class AuthService {
   constructor(
     private readonly userCredentialsRepository: UserCredentialsRepository,
     private readonly refreshTokenRepository: RefreshTokenRepository,
+    private readonly passwordResetRepository: PasswordResetRepository,
   ) {}
 
   async register(input: RegisterInput): Promise<AuthResponse> {
@@ -67,6 +77,7 @@ export class AuthService {
       };
 
       publishUserRegistered(userData);
+      logger.info({ userId: user.id }, 'User registered');
 
       return {
         accessToken,
@@ -75,18 +86,21 @@ export class AuthService {
       };
     } catch (error) {
       await transaction.rollback();
+      logger.error({ err: error, email: input.email }, 'Registration failed, transaction rolled back');
       throw error;
     }
   }
 
   async login(input: LoginInput): Promise<AuthTokens> {
     const credential = await this.userCredentialsRepository.findByEmail(input.email);
-    if (!credential) {
+    if (!credential?.passwordHash) {
+      logger.warn({ email: input.email }, 'Login failed: unknown email or no password set');
       throw new HttpError(401, 'Invalid credentials');
     }
 
     const valid = await verifyPassword(input.password, credential.passwordHash);
     if (!valid) {
+      logger.warn({ userId: credential.id }, 'Login failed: wrong password');
       throw new HttpError(401, 'Invalid credentials');
     }
 
@@ -97,6 +111,8 @@ export class AuthService {
       sub: credential.id,
       tokenId: refreshTokenRecord.tokenId,
     });
+
+    logger.info({ userId: credential.id }, 'User logged in');
 
     return {
       accessToken,
@@ -131,6 +147,8 @@ export class AuthService {
     await this.refreshTokenRepository.destroy(tokenRecord);
     const newTokenRecord = await this.createRefreshToken(credential.id);
 
+    logger.info({ userId: credential.id }, 'Refresh token rotated');
+
     return {
       accessToken: signAccessToken({ sub: credential.id, email: credential.email }),
       refreshToken: signRefreshToken({ sub: credential.id, tokenId: newTokenRecord.tokenId }),
@@ -139,6 +157,75 @@ export class AuthService {
 
   async revokeRefreshToken(userId: string): Promise<void> {
     await this.refreshTokenRepository.destroyAllByUserId(userId);
+    logger.info({ userId }, 'All refresh tokens revoked');
+  }
+
+  async loginWithGoogle(idToken: string): Promise<AuthTokens> {
+    const googlePayload = await verifyGoogleIdToken(idToken);
+
+    let credential = await this.userCredentialsRepository.findByGoogleId(googlePayload.sub);
+
+    if (!credential) {
+      credential = await this.userCredentialsRepository.findByEmail(googlePayload.email);
+
+      if (credential) {
+        await this.userCredentialsRepository.linkGoogleId(credential.id, googlePayload.sub);
+        logger.info({ userId: credential.id }, 'Linked existing account to Google');
+      } else {
+        credential = await this.userCredentialsRepository.createFromGoogle({
+          email: googlePayload.email,
+          displayName: googlePayload.name ?? googlePayload.email,
+          googleId: googlePayload.sub,
+        });
+
+        publishUserRegistered({
+          id: credential.id,
+          email: credential.email,
+          displayName: credential.displayName,
+          createdAt: credential.createdAt.toISOString(),
+        });
+        logger.info({ userId: credential.id }, 'Created new account via Google login');
+      }
+    }
+
+    const refreshTokenRecord = await this.createRefreshToken(credential.id);
+
+    return {
+      accessToken: signAccessToken({ sub: credential.id, email: credential.email }),
+      refreshToken: signRefreshToken({ sub: credential.id, tokenId: refreshTokenRecord.tokenId }),
+    };
+  }
+
+  async requestPasswordReset(email: string): Promise<void> {
+    const credential = await this.userCredentialsRepository.findByEmail(email);
+    if (!credential) {
+      // Don't reveal whether the email is registered.
+      logger.info({ email }, 'Password reset requested for unknown email');
+      return;
+    }
+
+    const otp = crypto.randomInt(0, 10 ** OTP_DIGITS).toString().padStart(OTP_DIGITS, '0');
+    await this.passwordResetRepository.saveOtp(email, otp);
+    publishPasswordResetRequested({ email, otp });
+    logger.info({ userId: credential.id }, 'Password reset OTP issued');
+  }
+
+  async resetPassword(input: { email: string; otp: string; newPassword: string }): Promise<void> {
+    const storedOtp = await this.passwordResetRepository.getOtp(input.email);
+    if (!storedOtp || storedOtp !== input.otp) {
+      throw new HttpError(400, 'Invalid or expired OTP');
+    }
+
+    const credential = await this.userCredentialsRepository.findByEmail(input.email);
+    if (!credential) {
+      throw new HttpError(400, 'Invalid or expired OTP');
+    }
+
+    const passwordHash = await hashPassword(input.newPassword);
+    await this.userCredentialsRepository.updatePassword(credential.id, passwordHash);
+    await this.passwordResetRepository.deleteOtp(input.email);
+    await this.refreshTokenRepository.destroyAllByUserId(credential.id);
+    logger.info({ userId: credential.id }, 'Password reset completed');
   }
 
   private async createRefreshToken(
@@ -163,4 +250,8 @@ export class AuthService {
   }
 }
 
-export const authService = new AuthService(userCredentialsRepository, refreshTokenRepository);
+export const authService = new AuthService(
+  userCredentialsRepository,
+  refreshTokenRepository,
+  passwordResetRepository,
+);

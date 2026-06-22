@@ -32,3 +32,25 @@ export const revokeHandler: RequestHandler = asyncHandler(async (req, res) => {
   await authService.revokeRefreshToken(userId);
   res.status(204).send();
 });
+
+export const googleLoginHandler: RequestHandler = asyncHandler(async (req, res) => {
+  const { idToken } = req.body as { idToken: string };
+  const tokens = await authService.loginWithGoogle(idToken);
+  res.json(tokens);
+});
+
+export const forgotPasswordHandler: RequestHandler = asyncHandler(async (req, res) => {
+  const { email } = req.body as { email: string };
+  await authService.requestPasswordReset(email);
+  res.status(202).json({ message: 'If this email is registered, a reset code has been sent' });
+});
+
+export const resetPasswordHandler: RequestHandler = asyncHandler(async (req, res) => {
+  const { email, otp, newPassword } = req.body as {
+    email: string;
+    otp: string;
+    newPassword: string;
+  };
+  await authService.resetPassword({ email, otp, newPassword });
+  res.status(204).send();
+});

@@ -3,14 +3,21 @@ import { createServer } from 'http';
 import { env } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { closeDatabase, connectToDatabase } from '@/db/sequelize';
+import { closeRedis, connectRedis } from '@/db/redis';
 import { initModels } from '@/models';
 import { closePublisher, initPublisher } from '@/messaging/event-publishing';
+import {
+  startPasswordResetConsumer,
+  stopPasswordResetConsumer,
+} from '@/messaging/password-reset-consumer';
 
 const main = async () => {
   try {
     await connectToDatabase();
     await initModels();
+    await connectRedis();
     await initPublisher();
+    await startPasswordResetConsumer();
 
     const app = createApp();
     const server = createServer(app);
@@ -24,7 +31,7 @@ const main = async () => {
     const shutdown = () => {
       logger.info('Shutting down auth service...');
 
-      Promise.all([closeDatabase(), closePublisher()])
+      Promise.all([closeDatabase(), closeRedis(), closePublisher(), stopPasswordResetConsumer()])
         .catch((error: unknown) => {
           logger.error({ error }, 'Error during shutdown tasks');
         })

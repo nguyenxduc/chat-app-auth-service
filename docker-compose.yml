@@ -147,10 +147,21 @@ services:
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
       RABBITMQ_URL: ${RABBITMQ_URL}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      REDIS_URL: ${REDIS_URL}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      MAIL_FROM: ${MAIL_FROM}
+      OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-600}
     depends_on:
       auth-db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - chatapp-network

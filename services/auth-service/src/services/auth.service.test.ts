@@ -10,6 +10,7 @@ vi.mock('@/models', () => ({
 
 vi.mock('@/messaging/event-publishing', () => ({
   publishUserRegistered: vi.fn(),
+  publishPasswordResetRequested: vi.fn(),
 }));
 
 vi.mock('@/utils/token', () => ({
@@ -20,9 +21,14 @@ vi.mock('@/utils/token', () => ({
   verifyRefreshToken: vi.fn(),
 }));
 
+vi.mock('@/utils/google', () => ({
+  verifyGoogleIdToken: vi.fn(),
+}));
+
 import { AuthService } from '@/services/auth.service';
-import { publishUserRegistered } from '@/messaging/event-publishing';
+import { publishPasswordResetRequested, publishUserRegistered } from '@/messaging/event-publishing';
 import { verifyPassword, verifyRefreshToken } from '@/utils/token';
+import { verifyGoogleIdToken } from '@/utils/google';
 import { sequelize } from '@/db/sequelize';
 
 const fakeTransaction = {
@@ -38,6 +44,10 @@ const createMockUserCredentialsRepository = () => ({
   findByEmail: vi.fn(),
   findById: vi.fn(),
   create: vi.fn(),
+  findByGoogleId: vi.fn(),
+  createFromGoogle: vi.fn(),
+  linkGoogleId: vi.fn(),
+  updatePassword: vi.fn(),
 });
 
 const createMockRefreshTokenRepository = () => ({
@@ -47,11 +57,37 @@ const createMockRefreshTokenRepository = () => ({
   destroyAllByUserId: vi.fn(),
 });
 
+const createMockPasswordResetRepository = () => ({
+  saveOtp: vi.fn(),
+  getOtp: vi.fn(),
+  deleteOtp: vi.fn(),
+});
+
+const createService = (
+  userRepo = createMockUserCredentialsRepository(),
+  refreshRepo = createMockRefreshTokenRepository(),
+  passwordResetRepo = createMockPasswordResetRepository(),
+) => ({
+  service: new AuthService(userRepo as never, refreshRepo as never, passwordResetRepo as never),
+  userRepo,
+  refreshRepo,
+  passwordResetRepo,
+});
+
 const fakeUser = {
   id: 'user-1',
   email: 'a@b.com',
   displayName: 'Test User',
   passwordHash: 'hashed-password',
+  createdAt: new Date('2024-01-01T00:00:00.000Z'),
+};
+
+const fakeGoogleUser = {
+  id: 'user-2',
+  email: 'google@b.com',
+  displayName: 'Google User',
+  passwordHash: null,
+  googleId: 'google-sub-1',
   createdAt: new Date('2024-01-01T00:00:00.000Z'),
 };
 
@@ -70,13 +106,10 @@ beforeEach(() => {
 
 describe('AuthService.register', () => {
   it('creates a user, commits the transaction, and publishes user.registered', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, userRepo, refreshRepo } = createService();
     userRepo.findByEmail.mockResolvedValue(null);
     userRepo.create.mockResolvedValue(fakeUser);
     refreshRepo.create.mockResolvedValue(fakeTokenRecord());
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     const result = await service.register({
       email: fakeUser.email,
@@ -105,11 +138,8 @@ describe('AuthService.register', () => {
   });
 
   it('throws a 409 HttpError when the email is already registered, without starting a transaction', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, userRepo } = createService();
     userRepo.findByEmail.mockResolvedValue(fakeUser);
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     await expect(
       service.register({ email: fakeUser.email, password: 'password123', displayName: 'X' }),
@@ -118,13 +148,10 @@ describe('AuthService.register', () => {
   });
 
   it('rolls back the transaction and rethrows when creation fails', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, userRepo } = createService();
     userRepo.findByEmail.mockResolvedValue(null);
     const dbError = new Error('insert failed');
     userRepo.create.mockRejectedValue(dbError);
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     await expect(
       service.register({ email: fakeUser.email, password: 'password123', displayName: 'X' }),
@@ -136,13 +163,10 @@ describe('AuthService.register', () => {
 
 describe('AuthService.login', () => {
   it('returns tokens for valid credentials', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, userRepo, refreshRepo } = createService();
     userRepo.findByEmail.mockResolvedValue(fakeUser);
     refreshRepo.create.mockResolvedValue(fakeTokenRecord());
     vi.mocked(verifyPassword).mockResolvedValue(true);
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     const result = await service.login({ email: fakeUser.email, password: 'password123' });
 
@@ -150,11 +174,8 @@ describe('AuthService.login', () => {
   });
 
   it('throws a 401 HttpError for an unknown email', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, userRepo } = createService();
     userRepo.findByEmail.mockResolvedValue(null);
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     await expect(
       service.login({ email: 'nope@b.com', password: 'password123' }),
@@ -162,30 +183,34 @@ describe('AuthService.login', () => {
   });
 
   it('throws a 401 HttpError for a wrong password', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, userRepo } = createService();
     userRepo.findByEmail.mockResolvedValue(fakeUser);
     vi.mocked(verifyPassword).mockResolvedValue(false);
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     await expect(
       service.login({ email: fakeUser.email, password: 'wrong-password' }),
     ).rejects.toMatchObject({ statusCode: 401, message: 'Invalid credentials' });
   });
+
+  it('throws a 401 HttpError for a Google-only account with no password set', async () => {
+    const { service, userRepo } = createService();
+    userRepo.findByEmail.mockResolvedValue(fakeGoogleUser);
+
+    await expect(
+      service.login({ email: fakeGoogleUser.email, password: 'whatever' }),
+    ).rejects.toMatchObject({ statusCode: 401, message: 'Invalid credentials' });
+    expect(verifyPassword).not.toHaveBeenCalled();
+  });
 });
 
 describe('AuthService.refreshTokens', () => {
   it('rotates the refresh token on success', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, userRepo, refreshRepo } = createService();
     const oldRecord = fakeTokenRecord();
     vi.mocked(verifyRefreshToken).mockReturnValue({ sub: fakeUser.id, tokenId: oldRecord.tokenId });
     refreshRepo.findByTokenId.mockResolvedValue(oldRecord);
     userRepo.findById.mockResolvedValue(fakeUser);
     refreshRepo.create.mockResolvedValue(fakeTokenRecord({ tokenId: 'token-2' }));
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     const result = await service.refreshTokens('old-refresh-token');
 
@@ -194,12 +219,9 @@ describe('AuthService.refreshTokens', () => {
   });
 
   it('throws a 401 HttpError when the token record is not found', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, refreshRepo } = createService();
     vi.mocked(verifyRefreshToken).mockReturnValue({ sub: fakeUser.id, tokenId: 'missing' });
     refreshRepo.findByTokenId.mockResolvedValue(null);
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     await expect(service.refreshTokens('bogus')).rejects.toMatchObject({
       statusCode: 401,
@@ -208,13 +230,10 @@ describe('AuthService.refreshTokens', () => {
   });
 
   it('destroys and rejects an expired token', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, refreshRepo } = createService();
     const expiredRecord = fakeTokenRecord({ expiresAt: new Date(Date.now() - 1000) });
     vi.mocked(verifyRefreshToken).mockReturnValue({ sub: fakeUser.id, tokenId: expiredRecord.tokenId });
     refreshRepo.findByTokenId.mockResolvedValue(expiredRecord);
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     await expect(service.refreshTokens('expired')).rejects.toMatchObject({
       statusCode: 401,
@@ -224,14 +243,11 @@ describe('AuthService.refreshTokens', () => {
   });
 
   it('throws a 401 HttpError when the user no longer exists', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
+    const { service, userRepo, refreshRepo } = createService();
     const record = fakeTokenRecord();
     vi.mocked(verifyRefreshToken).mockReturnValue({ sub: 'deleted-user', tokenId: record.tokenId });
     refreshRepo.findByTokenId.mockResolvedValue(record);
     userRepo.findById.mockResolvedValue(null);
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
 
     await expect(service.refreshTokens('orphaned')).rejects.toMatchObject({
       statusCode: 401,
@@ -242,12 +258,147 @@ describe('AuthService.refreshTokens', () => {
 
 describe('AuthService.revokeRefreshToken', () => {
   it('destroys all refresh tokens for the given user', async () => {
-    const userRepo = createMockUserCredentialsRepository();
-    const refreshRepo = createMockRefreshTokenRepository();
-
-    const service = new AuthService(userRepo as never, refreshRepo as never);
+    const { service, refreshRepo } = createService();
     await service.revokeRefreshToken('user-1');
 
     expect(refreshRepo.destroyAllByUserId).toHaveBeenCalledWith('user-1');
+  });
+});
+
+describe('AuthService.loginWithGoogle', () => {
+  it('logs in an existing Google-linked account', async () => {
+    const { service, userRepo, refreshRepo } = createService();
+    vi.mocked(verifyGoogleIdToken).mockResolvedValue({
+      sub: fakeGoogleUser.googleId,
+      email: fakeGoogleUser.email,
+      name: fakeGoogleUser.displayName,
+    });
+    userRepo.findByGoogleId.mockResolvedValue(fakeGoogleUser);
+    refreshRepo.create.mockResolvedValue(fakeTokenRecord());
+
+    const result = await service.loginWithGoogle('id-token');
+
+    expect(result).toEqual({ accessToken: 'access-token', refreshToken: 'refresh-token' });
+    expect(userRepo.findByEmail).not.toHaveBeenCalled();
+    expect(userRepo.createFromGoogle).not.toHaveBeenCalled();
+  });
+
+  it('links an existing email/password account on first Google login', async () => {
+    const { service, userRepo, refreshRepo } = createService();
+    vi.mocked(verifyGoogleIdToken).mockResolvedValue({
+      sub: 'google-sub-new',
+      email: fakeUser.email,
+      name: fakeUser.displayName,
+    });
+    userRepo.findByGoogleId.mockResolvedValue(null);
+    userRepo.findByEmail.mockResolvedValue(fakeUser);
+    refreshRepo.create.mockResolvedValue(fakeTokenRecord());
+
+    await service.loginWithGoogle('id-token');
+
+    expect(userRepo.linkGoogleId).toHaveBeenCalledWith(fakeUser.id, 'google-sub-new');
+    expect(userRepo.createFromGoogle).not.toHaveBeenCalled();
+    expect(publishUserRegistered).not.toHaveBeenCalled();
+  });
+
+  it('creates a brand new account and publishes user.registered when no match exists', async () => {
+    const { service, userRepo, refreshRepo } = createService();
+    vi.mocked(verifyGoogleIdToken).mockResolvedValue({
+      sub: fakeGoogleUser.googleId,
+      email: fakeGoogleUser.email,
+      name: fakeGoogleUser.displayName,
+    });
+    userRepo.findByGoogleId.mockResolvedValue(null);
+    userRepo.findByEmail.mockResolvedValue(null);
+    userRepo.createFromGoogle.mockResolvedValue(fakeGoogleUser);
+    refreshRepo.create.mockResolvedValue(fakeTokenRecord());
+
+    await service.loginWithGoogle('id-token');
+
+    expect(userRepo.createFromGoogle).toHaveBeenCalledWith({
+      email: fakeGoogleUser.email,
+      displayName: fakeGoogleUser.displayName,
+      googleId: fakeGoogleUser.googleId,
+    });
+    expect(publishUserRegistered).toHaveBeenCalledWith({
+      id: fakeGoogleUser.id,
+      email: fakeGoogleUser.email,
+      displayName: fakeGoogleUser.displayName,
+      createdAt: fakeGoogleUser.createdAt.toISOString(),
+    });
+  });
+
+  it('propagates an invalid Google token error unchanged', async () => {
+    const { service } = createService();
+    vi.mocked(verifyGoogleIdToken).mockRejectedValue(
+      Object.assign(new Error('Invalid Google token'), { statusCode: 401 }),
+    );
+
+    await expect(service.loginWithGoogle('bad-token')).rejects.toMatchObject({ statusCode: 401 });
+  });
+});
+
+describe('AuthService.requestPasswordReset', () => {
+  it('generates and stores an OTP, then publishes a password reset event', async () => {
+    const { service, userRepo, passwordResetRepo } = createService();
+    userRepo.findByEmail.mockResolvedValue(fakeUser);
+
+    await service.requestPasswordReset(fakeUser.email);
+
+    expect(passwordResetRepo.saveOtp).toHaveBeenCalledWith(
+      fakeUser.email,
+      expect.stringMatching(/^\d{6}$/),
+    );
+    expect(publishPasswordResetRequested).toHaveBeenCalledWith({
+      email: fakeUser.email,
+      otp: expect.stringMatching(/^\d{6}$/),
+    });
+  });
+
+  it('does nothing and does not leak whether the email exists', async () => {
+    const { service, userRepo, passwordResetRepo } = createService();
+    userRepo.findByEmail.mockResolvedValue(null);
+
+    await service.requestPasswordReset('unknown@b.com');
+
+    expect(passwordResetRepo.saveOtp).not.toHaveBeenCalled();
+    expect(publishPasswordResetRequested).not.toHaveBeenCalled();
+  });
+});
+
+describe('AuthService.resetPassword', () => {
+  it('updates the password, clears the OTP, and revokes existing refresh tokens', async () => {
+    const { service, userRepo, refreshRepo, passwordResetRepo } = createService();
+    passwordResetRepo.getOtp.mockResolvedValue('123456');
+    userRepo.findByEmail.mockResolvedValue(fakeUser);
+
+    await service.resetPassword({
+      email: fakeUser.email,
+      otp: '123456',
+      newPassword: 'new-password123',
+    });
+
+    expect(userRepo.updatePassword).toHaveBeenCalledWith(fakeUser.id, 'hashed-password');
+    expect(passwordResetRepo.deleteOtp).toHaveBeenCalledWith(fakeUser.email);
+    expect(refreshRepo.destroyAllByUserId).toHaveBeenCalledWith(fakeUser.id);
+  });
+
+  it('throws a 400 HttpError when the OTP does not match', async () => {
+    const { service, userRepo, passwordResetRepo } = createService();
+    passwordResetRepo.getOtp.mockResolvedValue('123456');
+
+    await expect(
+      service.resetPassword({ email: fakeUser.email, otp: '000000', newPassword: 'new-password123' }),
+    ).rejects.toMatchObject({ statusCode: 400, message: 'Invalid or expired OTP' });
+    expect(userRepo.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('throws a 400 HttpError when the OTP has expired (no longer in storage)', async () => {
+    const { service, passwordResetRepo } = createService();
+    passwordResetRepo.getOtp.mockResolvedValue(null);
+
+    await expect(
+      service.resetPassword({ email: fakeUser.email, otp: '123456', newPassword: 'new-password123' }),
+    ).rejects.toMatchObject({ statusCode: 400, message: 'Invalid or expired OTP' });
   });
 });
