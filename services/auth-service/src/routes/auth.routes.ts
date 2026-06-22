@@ -6,7 +6,7 @@ import {
   registerHandler,
   revokeHandler,
 } from '@/controllers/auth.controller';
-import { loginSchema, refreshSchema, registerSchema, revokeSchema } from '@/routes/auth.schema';
+import { loginSchema, refreshSchema, registerSchema, revokeSchema } from '@/validation/auth.schema';
 
 export const authRouter: Router = Router();
 

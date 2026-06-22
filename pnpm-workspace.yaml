@@ -1,3 +1,7 @@
 packages:
   - "services/*"
   - "packages/*"
+
+onlyBuiltDependencies:
+  - bcrypt
+  - esbuild
