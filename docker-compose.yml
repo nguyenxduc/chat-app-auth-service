@@ -76,26 +76,24 @@ services:
   
 
   auth-db:
-    image: mysql:8.0
+    image: postgres:16
     container_name: chatapp-auth-db
     environment:
-      MYSQL_DATABASE: ${AUTH_DB_NAME:-chatapp_auth_service}
-      MYSQL_USER: ${AUTH_DB_USER:-chatapp_auth_user}
-      MYSQL_PASSWORD: ${AUTH_DB_PASSWORD:-chatapp_auth_password}
-      MYSQL_ROOT_PASSWORD: ${AUTH_DB_ROOT_PASSWORD:-root_password}
-    command: ["mysqld", "--default-authentication-plugin=mysql_native_password"]
+      POSTGRES_DB: ${AUTH_DB_NAME:-chatapp_auth_service}
+      POSTGRES_USER: ${AUTH_DB_USER:-chatapp_auth_user}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-chatapp_auth_password}
     ports:
-      - "${AUTH_DB_PORT:-3306}:3306"
+      - "${AUTH_DB_PORT:-5433}:5432"
     volumes:
-      - auth-db-data:/var/lib/mysql
+      - auth-db-data:/var/lib/postgresql/data
     networks:
       - chatapp-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${AUTH_DB_ROOT_PASSWORD:-root_password}"]
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER:-chatapp_auth_user} -d ${AUTH_DB_NAME:-chatapp_auth_service}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 20s
   
   gateway-service:
     build: 
