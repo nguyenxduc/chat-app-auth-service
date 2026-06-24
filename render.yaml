@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: chatapp-auth-service
+    env: docker
+    dockerfilePath: ./services/auth-service/Dockerfile
+    dockerContext: .
+    branch: main
+    healthCheckPath: /health
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: AUTH_SERVICE_PORT
+        value: "4003"
+      - key: AUTH_DB_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 1d
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 30d
+      - key: RABBITMQ_URL
+        sync: false
+      - key: INTERNAL_API_TOKEN
+        sync: false
+      - key: REDIS_URL
+        sync: false
