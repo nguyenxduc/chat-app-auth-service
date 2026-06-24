@@ -69,9 +69,11 @@ USER nodeuser
 
 ENV NODE_ENV=production
 ENV AUTH_SERVICE_PORT=4003
+ENV OTEL_SERVICE_NAME=auth-service
 
 EXPOSE 4003
+EXPOSE 9464
 
 WORKDIR /app/services/auth-service
 
-CMD [ "node", "dist/index.js" ]
+CMD [ "node", "--import", "./dist/tracing.js", "dist/index.js" ]
