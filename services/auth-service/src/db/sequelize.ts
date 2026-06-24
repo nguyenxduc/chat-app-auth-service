@@ -4,7 +4,7 @@ import { env } from "@/config/env";
 import { logger } from "@/utils/logger";
 
 export const sequelize = new Sequelize(env.AUTH_DB_URL, {
-  dialect: "mysql",
+  dialect: "postgres",
   logging:
     env.NODE_ENV === "development"
       ? (msg: unknown) => {

@@ -76,26 +76,24 @@ services:
   
 
   auth-db:
-    image: mysql:8.0
+    image: postgres:16
     container_name: chatapp-auth-db
     environment:
-      MYSQL_DATABASE: ${AUTH_DB_NAME:-chatapp_auth_service}
-      MYSQL_USER: ${AUTH_DB_USER:-chatapp_auth_user}
-      MYSQL_PASSWORD: ${AUTH_DB_PASSWORD:-chatapp_auth_password}
-      MYSQL_ROOT_PASSWORD: ${AUTH_DB_ROOT_PASSWORD:-root_password}
-    command: ["mysqld", "--default-authentication-plugin=mysql_native_password"]
+      POSTGRES_DB: ${AUTH_DB_NAME:-chatapp_auth_service}
+      POSTGRES_USER: ${AUTH_DB_USER:-chatapp_auth_user}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:-chatapp_auth_password}
     ports:
-      - "${AUTH_DB_PORT:-3306}:3306"
+      - "${AUTH_DB_PORT:-5433}:5432"
     volumes:
-      - auth-db-data:/var/lib/mysql
+      - auth-db-data:/var/lib/postgresql/data
     networks:
       - chatapp-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${AUTH_DB_ROOT_PASSWORD:-root_password}"]
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER:-chatapp_auth_user} -d ${AUTH_DB_NAME:-chatapp_auth_service}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 20s
   
   gateway-service:
     build: 
@@ -131,12 +129,13 @@ services:
     
 
   auth-service:
-    build: 
+    build:
         context: .
         dockerfile: services/auth-service/Dockerfile
     container_name: chatapp-auth-service
     ports:
       - "${AUTH_SERVICE_PORT:-4003}:4003"
+      - "9464:9464"
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       AUTH_SERVICE_PORT: ${AUTH_SERVICE_PORT:-4003}
@@ -156,6 +155,9 @@ services:
       SMTP_PASS: ${SMTP_PASS}
       MAIL_FROM: ${MAIL_FROM}
       OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-600}
+      OTEL_SERVICE_NAME: auth-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318/v1/traces}
+      OTEL_METRICS_PORT: 9464
     depends_on:
       auth-db:
         condition: service_healthy
@@ -174,18 +176,22 @@ services:
     restart: unless-stopped
   
   user-service:
-    build: 
+    build:
         context: .
         dockerfile: services/user-service/Dockerfile
     container_name: chatapp-user-service
     ports:
       - "${USER_SERVICE_PORT:-4001}:4001"
+      - "9465:9464"
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       USER_SERVICE_PORT: ${USER_SERVICE_PORT:-4001}
       USER_DB_URL: ${USER_DB_URL}
       RABBITMQ_URL: ${RABBITMQ_URL}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      OTEL_SERVICE_NAME: user-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318/v1/traces}
+      OTEL_METRICS_PORT: 9464
     depends_on:
       user-db:
         condition: service_healthy

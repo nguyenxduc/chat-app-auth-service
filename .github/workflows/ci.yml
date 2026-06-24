@@ -41,17 +41,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, unit-test]
     services:
-      mysql:
-        image: mysql:8.0
+      postgres:
+        image: postgres:16
         env:
-          MYSQL_DATABASE: chatapp_auth_service
-          MYSQL_USER: chatapp_auth_user
-          MYSQL_PASSWORD: testpassword
-          MYSQL_ROOT_PASSWORD: root_password
+          POSTGRES_DB: chatapp_auth_service
+          POSTGRES_USER: chatapp_auth_user
+          POSTGRES_PASSWORD: testpassword
         ports:
-          - 3306:3306
+          - 5432:5432
         options: >-
-          --health-cmd="mysqladmin ping -h localhost -u root -proot_password"
+          --health-cmd="pg_isready -U chatapp_auth_user -d chatapp_auth_service"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10

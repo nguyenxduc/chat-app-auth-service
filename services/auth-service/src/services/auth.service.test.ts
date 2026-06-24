@@ -1,5 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Prevent createEnv Zod validation from failing when AUTH_DB_URL is not set in CI.
+vi.mock('@/config/env', () => ({
+  env: {
+    AUTH_DB_URL: 'postgres://test:test@localhost:5432/test',
+    JWT_SECRET: 'unit-test-jwt-secret-at-least-32-chars',
+    JWT_REFRESH_SECRET: 'unit-test-refresh-secret-at-least-32c',
+    JWT_EXPIRES_IN: '1d',
+    JWT_REFRESH_EXPIRES_IN: '30d',
+    RABBITMQ_URL: 'amqp://localhost',
+    INTERNAL_API_TOKEN: 'unit-test-internal-token-at-least-32c',
+    NODE_ENV: 'test',
+    SMTP_PORT: 587,
+    SMTP_SECURE: false,
+    OTP_TTL_SECONDS: 600,
+    AUTH_SERVICE_PORT: 4003,
+  },
+}));
+
+// Prevent Sequelize from connecting to a real database in unit tests.
+vi.mock('@/db/sequelize', () => ({
+  sequelize: { transaction: vi.fn() },
+  connectToDatabase: vi.fn(),
+  closeDatabase: vi.fn(),
+}));
+
 // auth.service.ts pulls in the repository modules (for its exported singleton),
 // which import @/models — mock that leaf so a real (unconnected) Sequelize Model.init()
 // never runs during these unit tests.
