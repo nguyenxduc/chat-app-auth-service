@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 
-// e2e tests run against real infra (MySQL + Redis) reachable on localhost,
+// e2e tests run against real infra (PostgreSQL + Redis) reachable on localhost,
 // e.g. via `docker compose up -d auth-db redis` from the repo root.
 // Self-contained on purpose: works the same locally and in CI service containers,
 // without depending on the gitignored root .env file.
@@ -14,7 +14,7 @@ export default defineConfig({
     hookTimeout: 20_000,
     env: {
       NODE_ENV: 'test',
-      AUTH_DB_URL: 'mysql://chatapp_auth_user:testpassword@localhost:3306/chatapp_auth_service',
+      AUTH_DB_URL: 'postgres://chatapp_auth_user:testpassword@localhost:5432/chatapp_auth_service',
       RABBITMQ_URL: 'amqp://guest:guest@localhost:5672',
       REDIS_URL: 'redis://localhost:6379',
       JWT_SECRET: 'e2e-test-jwt-secret-needs-32-characters-min',
