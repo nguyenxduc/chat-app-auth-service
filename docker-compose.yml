@@ -129,12 +129,13 @@ services:
     
 
   auth-service:
-    build: 
+    build:
         context: .
         dockerfile: services/auth-service/Dockerfile
     container_name: chatapp-auth-service
     ports:
       - "${AUTH_SERVICE_PORT:-4003}:4003"
+      - "9464:9464"
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       AUTH_SERVICE_PORT: ${AUTH_SERVICE_PORT:-4003}
@@ -154,6 +155,9 @@ services:
       SMTP_PASS: ${SMTP_PASS}
       MAIL_FROM: ${MAIL_FROM}
       OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-600}
+      OTEL_SERVICE_NAME: auth-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318/v1/traces}
+      OTEL_METRICS_PORT: 9464
     depends_on:
       auth-db:
         condition: service_healthy
@@ -172,18 +176,22 @@ services:
     restart: unless-stopped
   
   user-service:
-    build: 
+    build:
         context: .
         dockerfile: services/user-service/Dockerfile
     container_name: chatapp-user-service
     ports:
       - "${USER_SERVICE_PORT:-4001}:4001"
+      - "9465:9464"
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       USER_SERVICE_PORT: ${USER_SERVICE_PORT:-4001}
       USER_DB_URL: ${USER_DB_URL}
       RABBITMQ_URL: ${RABBITMQ_URL}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      OTEL_SERVICE_NAME: user-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318/v1/traces}
+      OTEL_METRICS_PORT: 9464
     depends_on:
       user-db:
         condition: service_healthy
