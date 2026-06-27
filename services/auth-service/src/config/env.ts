@@ -17,7 +17,13 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().min(0).max(65_535).default(587),
-  SMTP_SECURE: z.coerce.boolean().default(false),
+  // NOT z.coerce.boolean(): that coerces via JS truthiness, so the literal
+  // string "false" (non-empty) would coerce to `true` and nodemailer would
+  // attempt implicit TLS on a STARTTLS-only port (587), breaking SMTP.
+  SMTP_SECURE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().optional(),
