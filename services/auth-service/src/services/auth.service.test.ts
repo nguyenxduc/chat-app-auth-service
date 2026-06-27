@@ -195,7 +195,16 @@ describe('AuthService.login', () => {
 
     const result = await service.login({ email: fakeUser.email, password: 'password123' });
 
-    expect(result).toEqual({ accessToken: 'access-token', refreshToken: 'refresh-token' });
+    expect(result).toEqual({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      user: {
+        id: fakeUser.id,
+        email: fakeUser.email,
+        displayName: fakeUser.displayName,
+        createdAt: fakeUser.createdAt.toISOString(),
+      },
+    });
   });
 
   it('throws a 401 HttpError for an unknown email', async () => {
@@ -240,7 +249,16 @@ describe('AuthService.refreshTokens', () => {
     const result = await service.refreshTokens('old-refresh-token');
 
     expect(refreshRepo.destroy).toHaveBeenCalledWith(oldRecord);
-    expect(result).toEqual({ accessToken: 'access-token', refreshToken: 'refresh-token' });
+    expect(result).toEqual({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      user: {
+        id: fakeUser.id,
+        email: fakeUser.email,
+        displayName: fakeUser.displayName,
+        createdAt: fakeUser.createdAt.toISOString(),
+      },
+    });
   });
 
   it('throws a 401 HttpError when the token record is not found', async () => {
@@ -303,7 +321,16 @@ describe('AuthService.loginWithGoogle', () => {
 
     const result = await service.loginWithGoogle('id-token');
 
-    expect(result).toEqual({ accessToken: 'access-token', refreshToken: 'refresh-token' });
+    expect(result).toEqual({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      user: {
+        id: fakeGoogleUser.id,
+        email: fakeGoogleUser.email,
+        displayName: fakeGoogleUser.displayName,
+        createdAt: fakeGoogleUser.createdAt.toISOString(),
+      },
+    });
     expect(userRepo.findByEmail).not.toHaveBeenCalled();
     expect(userRepo.createFromGoogle).not.toHaveBeenCalled();
   });

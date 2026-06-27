@@ -12,7 +12,8 @@ import {
   passwordResetRepository,
   PasswordResetRepository,
 } from '@/repositories/password-reset.repository';
-import { AuthResponse, AuthTokens, LoginInput, RegisterInput } from '@/types/auth';
+import { AuthResponse, LoginInput, RegisterInput, UserData } from '@/types/auth';
+import type { UserCredentials } from '@/models';
 import {
   hashPassword,
   signAccessToken,
@@ -69,14 +70,9 @@ export class AuthService {
         tokenId: refreshTokenRecord.tokenId,
       });
 
-      const userData = {
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        createdAt: user.createdAt.toISOString(),
-      };
+      const userData = this.toUserData(user);
 
-      publishUserRegistered(userData);
+      publishUserRegistered({ ...userData });
       logger.info({ userId: user.id }, 'User registered');
 
       return {
@@ -91,7 +87,7 @@ export class AuthService {
     }
   }
 
-  async login(input: LoginInput): Promise<AuthTokens> {
+  async login(input: LoginInput): Promise<AuthResponse> {
     const credential = await this.userCredentialsRepository.findByEmail(input.email);
     if (!credential?.passwordHash) {
       logger.warn({ email: input.email }, 'Login failed: unknown email or no password set');
@@ -117,10 +113,11 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
+      user: this.toUserData(credential),
     };
   }
 
-  async refreshTokens(token: string): Promise<AuthTokens> {
+  async refreshTokens(token: string): Promise<AuthResponse> {
     const payload = verifyRefreshToken(token);
 
     const tokenRecord = await this.refreshTokenRepository.findByTokenId(
@@ -152,6 +149,7 @@ export class AuthService {
     return {
       accessToken: signAccessToken({ sub: credential.id, email: credential.email }),
       refreshToken: signRefreshToken({ sub: credential.id, tokenId: newTokenRecord.tokenId }),
+      user: this.toUserData(credential),
     };
   }
 
@@ -160,7 +158,7 @@ export class AuthService {
     logger.info({ userId }, 'All refresh tokens revoked');
   }
 
-  async loginWithGoogle(idToken: string): Promise<AuthTokens> {
+  async loginWithGoogle(idToken: string): Promise<AuthResponse> {
     const googlePayload = await verifyGoogleIdToken(idToken);
 
     let credential = await this.userCredentialsRepository.findByGoogleId(googlePayload.sub);
@@ -193,6 +191,7 @@ export class AuthService {
     return {
       accessToken: signAccessToken({ sub: credential.id, email: credential.email }),
       refreshToken: signRefreshToken({ sub: credential.id, tokenId: refreshTokenRecord.tokenId }),
+      user: this.toUserData(credential),
     };
   }
 
@@ -226,6 +225,15 @@ export class AuthService {
     await this.passwordResetRepository.deleteOtp(input.email);
     await this.refreshTokenRepository.destroyAllByUserId(credential.id);
     logger.info({ userId: credential.id }, 'Password reset completed');
+  }
+
+  private toUserData(credential: UserCredentials): UserData {
+    return {
+      id: credential.id,
+      email: credential.email,
+      displayName: credential.displayName,
+      createdAt: credential.createdAt.toISOString(),
+    };
   }
 
   private async createRefreshToken(
